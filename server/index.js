@@ -17,6 +17,11 @@ function broadcastRoomState(room, io) {
 const app = express();
 app.use(cors());
 
+// Health check endpoint for keep-alive bots
+app.get('/ping', (req, res) => {
+  res.status(200).send('pong');
+});
+
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
