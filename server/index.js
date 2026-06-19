@@ -6,6 +6,14 @@ const cors = require('cors');
 const RoomManager = require('./game/RoomManager');
 const PokerLogic = require('./game/PokerLogic');
 
+function broadcastRoomState(room, io) {
+  room.players.forEach(p => {
+    if (p.socketId) {
+      io.to(p.socketId).emit('roomState', room.getPublicState(p.id));
+    }
+  });
+}
+
 const app = express();
 app.use(cors());
 
@@ -25,7 +33,7 @@ io.on('connection', (socket) => {
     const player = room.addPlayer(hostId, name, socket.id);
     socket.join(room.code);
     callback({ success: true, code: room.code });
-    io.to(room.code).emit('roomState', room.getPublicState());
+    broadcastRoomState(room, io);
   });
 
   socket.on('joinRoom', ({ code, playerId, name }, callback) => {
@@ -36,14 +44,14 @@ io.on('connection', (socket) => {
     room.addPlayer(playerId, name, socket.id);
     socket.join(room.code);
     callback({ success: true });
-    io.to(room.code).emit('roomState', room.getPublicState());
+    broadcastRoomState(room, io);
   });
 
   socket.on('startHand', ({ code, hostId }) => {
     const room = RoomManager.getRoom(code);
     if (room && room.hostId === hostId) {
       room.startHand();
-      io.to(code).emit('roomState', room.getPublicState());
+      broadcastRoomState(room, io);
     }
   });
 
@@ -51,7 +59,7 @@ io.on('connection', (socket) => {
     const room = RoomManager.getRoom(code);
     if (room) {
       const success = room.bet(playerId, amount);
-      if (success) io.to(code).emit('roomState', room.getPublicState());
+      if (success) broadcastRoomState(room, io);
     }
   });
 
@@ -59,7 +67,7 @@ io.on('connection', (socket) => {
     const room = RoomManager.getRoom(code);
     if (room) {
       const success = room.fold(playerId);
-      if (success) io.to(code).emit('roomState', room.getPublicState());
+      if (success) broadcastRoomState(room, io);
     }
   });
 
@@ -67,7 +75,7 @@ io.on('connection', (socket) => {
     const room = RoomManager.getRoom(code);
     if (room && room.hostId === hostId) {
       room.manuallyDistribute(distributions);
-      io.to(code).emit('roomState', room.getPublicState());
+      broadcastRoomState(room, io);
     }
   });
 
@@ -88,7 +96,7 @@ io.on('connection', (socket) => {
           }
         });
         room.state = 'WAITING';
-        io.to(code).emit('roomState', room.getPublicState());
+        broadcastRoomState(room, io);
         io.to(code).emit('winnersAnnounced', { winners });
       }
     }
@@ -100,7 +108,7 @@ io.on('connection', (socket) => {
       const player = room.players.find(p => p.socketId === socket.id);
       if (player) {
         room.removePlayer(player.id);
-        io.to(code).emit('roomState', room.getPublicState());
+        broadcastRoomState(room, io);
       }
     }
   });

@@ -8,10 +8,10 @@ function App() {
   const [roomState, setRoomState] = useState(null);
 
   useEffect(() => {
-    let sid = localStorage.getItem('pokler_session');
+    let sid = sessionStorage.getItem('pokler_session');
     if (!sid) {
       sid = Math.random().toString(36).substring(2, 15);
-      localStorage.setItem('pokler_session', sid);
+      sessionStorage.setItem('pokler_session', sid);
     }
     setSessionId(sid);
 

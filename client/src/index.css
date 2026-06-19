@@ -1,7 +1,3 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
 
-body {
-  @apply bg-slate-900 text-slate-100 font-sans antialiased;
-}
+/* Base styles are now applied in index.html to avoid Tailwind v4 apply bugs */

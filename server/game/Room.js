@@ -1,5 +1,8 @@
 const Player = require('./Player');
 
+const Deck = require('./Deck');
+const PokerLogic = require('./PokerLogic');
+
 class Room {
   constructor(code, options) {
     this.code = code;
@@ -10,6 +13,11 @@ class Room {
     this.initialChips = parseInt(options.initialChips) || 1000;
     this.smallBlind = parseInt(options.smallBlind) || 10;
     this.bigBlind = parseInt(options.bigBlind) || 20;
+    
+    this.gameMode = options.gameMode || 'physical'; // 'physical' or 'virtual'
+    this.deck = null;
+    this.communityCards = [];
+    this.winners = [];
 
     this.pots = []; // [{ amount: 0, eligiblePlayers: [] }]
     this.dealerIndex = -1;
@@ -18,6 +26,7 @@ class Room {
     this.roundBets = {}; // playerId -> amount
     this.minRaise = this.bigBlind;
     this.lastRaiserIndex = -1;
+    this.street = 0; // 0=Preflop, 1=Flop, 2=Turn, 3=River
   }
 
   addPlayer(id, name, socketId) {
@@ -56,15 +65,24 @@ class Room {
     this.state = 'PLAYING';
     this.pots = [{ amount: 0, eligiblePlayers: [] }];
     this.roundBets = {};
+    this.communityCards = [];
+    this.winners = [];
     this.highestBet = 0;
     this.minRaise = this.bigBlind;
     this.lastRaiserIndex = -1;
+
+    if (this.gameMode === 'virtual') {
+      this.deck = new Deck();
+    }
 
     // Reset players
     this.players.forEach(p => {
       p.resetForNewHand();
       this.roundBets[p.id] = 0;
-      if (!p.disconnected) this.pots[0].eligiblePlayers.push(p.id);
+      if (!p.disconnected && p.chips > 0) {
+          this.pots[0].eligiblePlayers.push(p.id);
+          if (this.gameMode === 'virtual') p.cards = this.deck.deal(2);
+      }
     });
 
     // Move dealer button
@@ -73,19 +91,36 @@ class Room {
         this.dealerIndex = (this.dealerIndex + 1) % this.players.length;
     }
 
-    // Post blinds
-    const sbIndex = this.getNextActivePlayerIndex(this.dealerIndex);
-    const bbIndex = this.getNextActivePlayerIndex(sbIndex);
-
-    this.placeBetInternal(this.players[sbIndex], this.smallBlind, true);
-    this.placeBetInternal(this.players[bbIndex], this.bigBlind, true);
-
-    this.highestBet = this.bigBlind;
-    this.lastRaiserIndex = bbIndex;
-    
-    this.currentTurnIndex = this.getNextActivePlayerIndex(bbIndex);
+    this.street = 0;
+    this.startBettingRound();
 
     return true;
+  }
+
+  startBettingRound() {
+    this.highestBet = 0;
+    
+    if (this.street === 0) {
+        this.minRaise = 0; // Preflop: can bet any amount
+        this.currentTurnIndex = this.dealerIndex; // Starts on Dealer
+    } else {
+        this.minRaise = this.bigBlind; // Postflop: minimum bet is the big blind
+        
+        if (this.gameMode === 'virtual') {
+            if (this.street === 1) this.communityCards.push(...this.deck.deal(3)); // Flop
+            if (this.street === 2) this.communityCards.push(...this.deck.deal(1)); // Turn
+            if (this.street === 3) this.communityCards.push(...this.deck.deal(1)); // River
+        }
+
+        // Starts on first active player from dealer
+        let firstActive = this.dealerIndex;
+        if (this.players[firstActive].folded || this.players[firstActive].allIn || this.players[firstActive].chips === 0 || this.players[firstActive].disconnected) {
+            firstActive = this.getNextActivePlayerIndex(firstActive);
+        }
+        this.currentTurnIndex = firstActive;
+    }
+    
+    this.lastRaiserIndex = this.currentTurnIndex;
   }
 
   getNextActivePlayerIndex(startIndex) {
@@ -121,6 +156,11 @@ class Room {
     if (this.players[this.currentTurnIndex].id !== playerId) return false;
 
     const player = this.players[this.currentTurnIndex];
+
+    const bbIndex = this.dealerIndex;
+    if (this.street === 0 && this.highestBet === 0 && this.currentTurnIndex === bbIndex && amount === 0) {
+        return false; // BB must bet something initially in Preflop
+    }
     
     // amount is the TOTAL they want to put in this round.
     // actual call amount needed: this.highestBet - this.roundBets[playerId]
@@ -135,6 +175,12 @@ class Room {
     }
 
     const actualAdded = this.placeBetInternal(player, toAdd);
+
+    // Dynamically set BB and SB amounts based on the first player's initial bet in Preflop
+    if (this.street === 0 && this.highestBet === 0 && this.currentTurnIndex === this.dealerIndex) {
+        this.bigBlind = amount;
+        this.smallBlind = Math.ceil(amount / 2);
+    }
 
     if (this.roundBets[playerId] > this.highestBet) {
        this.minRaise = Math.max(this.minRaise, this.roundBets[playerId] - this.highestBet);
@@ -151,6 +197,20 @@ class Room {
     if (this.players[this.currentTurnIndex].id !== playerId) return false;
 
     const player = this.players[this.currentTurnIndex];
+
+    const bbIndex = this.dealerIndex;
+    const sbIndex = this.getNextActivePlayerIndex(bbIndex);
+
+    // BB cannot fold initially in Preflop
+    if (this.street === 0 && this.highestBet === 0 && this.currentTurnIndex === bbIndex) {
+        return false; 
+    }
+
+    // SB fold penalty (if they haven't betted yet in Preflop)
+    if (this.street === 0 && this.currentTurnIndex === sbIndex && player.currentBet === 0) {
+        this.placeBetInternal(player, this.smallBlind, false);
+    }
+
     player.folded = true;
 
     // Remove from eligible pots
@@ -173,22 +233,77 @@ class Room {
   advanceTurn() {
     let nextIndex = this.getNextActivePlayerIndex(this.currentTurnIndex);
     
-    if (nextIndex === -1 || nextIndex === this.lastRaiserIndex || 
-        (this.highestBet === 0 && nextIndex === this.getNextActivePlayerIndex(this.dealerIndex))) {
+    if (nextIndex === -1 || nextIndex === this.lastRaiserIndex) {
         // Round ends
         this.resolveRound();
         
         const active = this.getActivePlayers();
-        if (active.length <= 1) {
+        
+        // If everyone folded/all-in except 1, or we just finished the 4th betting round (River)
+        if (active.length <= 1 || this.street >= 3) {
             this.state = 'SHOWDOWN';
             this.currentTurnIndex = -1;
+            
+            if (this.gameMode === 'virtual') {
+                const unfolded = this.getUnfoldedPlayers();
+                
+                if (unfolded.length > 1) {
+                    // Ensure all 5 community cards are dealt if everyone went all-in early
+                    while (this.communityCards.length < 5) {
+                        if (this.communityCards.length === 0) this.communityCards.push(...this.deck.deal(3));
+                        else this.communityCards.push(...this.deck.deal(1));
+                    }
+                    
+                    this.pots.forEach(pot => {
+                        if (pot.amount === 0) return;
+                        
+                        // Only unfolded players eligible for THIS pot compete for it
+                        const playerHands = {};
+                        pot.eligiblePlayers.forEach(id => {
+                            let p = this.players.find(player => player.id === id);
+                            if (p && !p.folded && p.cards) playerHands[p.id] = p.cards;
+                        });
+                        
+                        let potWinners = [];
+                        if (Object.keys(playerHands).length > 0) {
+                            try {
+                                potWinners = PokerLogic.evaluateWinner(this.communityCards, playerHands);
+                            } catch (err) {
+                                console.error('PokerLogic error:', err);
+                            }
+                        }
+                        
+                        // Fallback if evaluation fails
+                        if (potWinners.length === 0) {
+                            potWinners = pot.eligiblePlayers.filter(id => {
+                                let p = this.players.find(player => player.id === id);
+                                return p && !p.folded;
+                            });
+                        }
+                        
+                        if (potWinners.length > 0) {
+                            const split = Math.floor(pot.amount / potWinners.length);
+                            potWinners.forEach(id => {
+                                let p = this.players.find(player => player.id === id);
+                                if (p) p.chips += split;
+                            });
+                            
+                            // Highlight winners on UI
+                            potWinners.forEach(id => {
+                                if (!this.winners.includes(id)) this.winners.push(id);
+                            });
+                        }
+                    });
+                } else if (unfolded.length === 1) {
+                    this.winners = [unfolded[0].id];
+                    this.pots.forEach(pot => {
+                        unfolded[0].chips += pot.amount;
+                    });
+                }
+            }
         } else {
-            // New betting round
-            this.highestBet = 0;
-            this.minRaise = this.bigBlind;
-            this.players.forEach(p => { p.currentBet = 0; this.roundBets[p.id] = 0; });
-            this.currentTurnIndex = this.getNextActivePlayerIndex(this.dealerIndex);
-            this.lastRaiserIndex = this.currentTurnIndex;
+            this.street++;
+            this.startBettingRound();
         }
     } else {
         this.currentTurnIndex = nextIndex;
@@ -253,7 +368,7 @@ class Room {
     this.state = 'WAITING';
   }
 
-  getPublicState() {
+  getPublicState(playerId) {
     return {
       code: this.code,
       hostId: this.hostId,
@@ -262,6 +377,7 @@ class Room {
       smallBlind: this.smallBlind,
       bigBlind: this.bigBlind,
       pots: this.pots,
+      street: this.street,
       dealerIndex: this.dealerIndex,
       currentTurnIndex: this.currentTurnIndex,
       highestBet: this.highestBet,
@@ -274,8 +390,12 @@ class Room {
         currentBet: p.currentBet,
         folded: p.folded,
         allIn: p.allIn,
-        disconnected: p.disconnected
-      }))
+        disconnected: p.disconnected,
+        cards: (this.state === 'SHOWDOWN' && !p.folded && p.cards && p.cards.length > 0) || p.id === playerId ? p.cards : (p.cards && p.cards.length > 0 ? ['back', 'back'] : [])
+      })),
+      communityCards: this.communityCards,
+      gameMode: this.gameMode,
+      winners: this.winners
     };
   }
 }

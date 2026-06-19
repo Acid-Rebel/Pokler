@@ -5,16 +5,42 @@ import { motion, AnimatePresence } from 'framer-motion';
 import ShowdownModal from '../components/ShowdownModal';
 import ManualAwardModal from '../components/ManualAwardModal';
 
+const suitSymbols = { 's': '♠', 'h': '♥', 'd': '♦', 'c': '♣' };
+const suitColors = { 's': 'text-slate-800', 'h': 'text-rose-600', 'd': 'text-rose-600', 'c': 'text-slate-800' };
+
+const PlayingCard = ({ card }) => {
+  if (!card) return null;
+  if (card === 'back') {
+    return (
+      <div className="w-10 h-14 md:w-12 md:h-16 rounded-md bg-gradient-to-br from-indigo-500 to-purple-600 border border-white/20 shadow-md flex items-center justify-center">
+        <div className="w-8 h-12 md:w-10 md:h-14 border border-white/30 rounded-sm opacity-50 bg-[repeating-linear-gradient(45deg,transparent,transparent_2px,rgba(255,255,255,0.1)_2px,rgba(255,255,255,0.1)_4px)]"></div>
+      </div>
+    );
+  }
+  const rank = card[0];
+  const suit = card[1];
+  return (
+    <div className={`w-10 h-14 md:w-12 md:h-16 rounded-md bg-white border border-slate-200 shadow-md flex flex-col items-center justify-center ${suitColors[suit]} font-bold`}>
+      <span className="text-sm md:text-base leading-none">{rank === 'T' ? '10' : rank}</span>
+      <span className="text-xl md:text-2xl leading-none">{suitSymbols[suit]}</span>
+    </div>
+  );
+};
+
 export default function Room({ sessionId, roomState }) {
   const [showAutoAward, setShowAutoAward] = useState(false);
   const [showManualAward, setShowManualAward] = useState(false);
-  const [betAmount, setBetAmount] = useState(0);
+  const [betAmount, setBetAmount] = useState('');
 
   const me = roomState.players.find(p => p.id === sessionId);
   const isHost = me?.isHost;
   const isMyTurn = roomState.state === 'PLAYING' && roomState.players[roomState.currentTurnIndex]?.id === sessionId;
 
-  const totalPot = useMemo(() => roomState.pots.reduce((sum, pot) => sum + pot.amount, 0), [roomState.pots]);
+  const totalPot = useMemo(() => {
+    const mainPots = roomState.pots.reduce((sum, pot) => sum + pot.amount, 0);
+    const activeBets = roomState.players.reduce((sum, p) => sum + (p.currentBet || 0), 0);
+    return mainPots + activeBets;
+  }, [roomState.pots, roomState.players]);
   const currentHighestBet = roomState.highestBet;
   const callAmount = Math.max(0, currentHighestBet - (me?.currentBet || 0));
   const minRaise = roomState.minRaise;
@@ -97,17 +123,17 @@ export default function Room({ sessionId, roomState }) {
             className="space-y-3 bg-slate-800/40 p-5 rounded-2xl border border-slate-700/50 backdrop-blur-sm"
           >
             <h3 className="text-xs font-bold text-slate-400 tracking-widest uppercase flex items-center gap-2 mb-4"><Crown size={14} className="text-amber-400"/> Host Controls</h3>
-            {roomState.state === 'WAITING' && (
+            {(roomState.state === 'WAITING' || (roomState.gameMode === 'virtual' && roomState.state === 'SHOWDOWN')) && (
               <motion.button 
                 whileHover={{ scale: 1.02 }}
                 whileTap={{ scale: 0.98 }}
                 onClick={handleStartHand}
                 className="w-full bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-400 hover:to-emerald-500 text-white font-bold py-3 rounded-xl flex justify-center items-center gap-2 shadow-lg shadow-emerald-900/30 transition-all"
               >
-                <Play size={18} /> Start Hand
+                <Play size={18} /> {roomState.state === 'SHOWDOWN' ? 'Next Hand' : 'Start Hand'}
               </motion.button>
             )}
-            {(roomState.state === 'SHOWDOWN' || roomState.state === 'WAITING') && totalPot > 0 && (
+            {roomState.gameMode === 'physical' && (roomState.state === 'SHOWDOWN' || roomState.state === 'WAITING') && totalPot > 0 && (
               <div className="flex gap-2">
                 <motion.button 
                   whileHover={{ scale: 1.02 }}
@@ -137,8 +163,19 @@ export default function Room({ sessionId, roomState }) {
       <div className="flex-1 p-4 md:p-8 flex flex-col relative z-10">
         <div className="flex-1 rounded-[3rem] border border-slate-800/60 p-6 flex flex-col justify-center items-center relative shadow-2xl">
           {/* Animated Table Background */}
-          <div className="absolute inset-4 md:inset-12 border-[12px] border-slate-800 rounded-[5rem] md:rounded-[10rem] bg-gradient-to-br from-emerald-900/40 to-teal-950/40 shadow-[inset_0_0_100px_rgba(0,0,0,0.8)] flex items-center justify-center overflow-hidden">
+          <div className="absolute inset-4 md:inset-12 border-[12px] border-slate-800 rounded-[5rem] md:rounded-[10rem] bg-gradient-to-br from-emerald-900/40 to-teal-950/40 shadow-[inset_0_0_100px_rgba(0,0,0,0.8)] flex flex-col items-center justify-center overflow-hidden">
             <div className="absolute w-full h-full bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-emerald-500/5 via-transparent to-transparent"></div>
+            
+            {/* Community Cards */}
+            {roomState.gameMode === 'virtual' && roomState.communityCards && roomState.communityCards.length > 0 && (
+              <div className="relative z-10 flex gap-2 mb-6 p-4 bg-black/20 rounded-2xl backdrop-blur-sm border border-emerald-500/10 shadow-xl">
+                {roomState.communityCards.map((card, idx) => (
+                  <motion.div key={idx} initial={{ scale: 0, x: -50 }} animate={{ scale: 1, x: 0 }} transition={{ delay: idx * 0.1 }}>
+                    <PlayingCard card={card} />
+                  </motion.div>
+                ))}
+              </div>
+            )}
             
             {/* Center Logo/Status */}
             <AnimatePresence mode="wait">
@@ -151,16 +188,30 @@ export default function Room({ sessionId, roomState }) {
                 className="relative z-10"
               >
                 {roomState.state === 'WAITING' && <div className="text-xl md:text-3xl text-emerald-500/20 font-black tracking-[0.3em] uppercase">Waiting</div>}
-                {roomState.state === 'PLAYING' && <div className="text-xl md:text-2xl text-emerald-500/30 font-black tracking-widest uppercase">Action on <span className="text-emerald-400/50">{roomState.players[roomState.currentTurnIndex]?.name}</span></div>}
+                {roomState.state === 'PLAYING' && (
+                  <div className="flex flex-col items-center">
+                    <div className="text-sm text-emerald-500/30 font-bold tracking-widest uppercase mb-1">
+                      {['Round 1 (Preflop)', 'Round 2 (Flop)', 'Round 3 (Turn)', 'Round 4 (River)'][roomState.street || 0]}
+                    </div>
+                    <div className="text-xl md:text-2xl text-emerald-500/30 font-black tracking-widest uppercase">
+                      Action on <span className="text-emerald-400/50">{roomState.players[roomState.currentTurnIndex]?.name}</span>
+                    </div>
+                  </div>
+                )}
                 {roomState.state === 'SHOWDOWN' && <div className="text-xl md:text-4xl text-amber-500/40 font-black tracking-[0.2em] uppercase">Showdown</div>}
               </motion.div>
             </AnimatePresence>
           </div>
 
           {/* Players Ring */}
-          <div className="w-full h-full relative z-20 flex flex-wrap justify-center items-center gap-8 md:gap-12 p-8">
+          <div className="absolute inset-0 z-20 pointer-events-none">
             <AnimatePresence>
               {roomState.players.map((p, index) => {
+                const angle = (index * (360 / Math.max(1, roomState.players.length)) + 90) * (Math.PI / 180);
+                const radius = 38; // % from center
+                const left = `calc(50% + ${Math.cos(angle) * radius}%)`;
+                const top = `calc(50% + ${Math.sin(angle) * radius}%)`;
+
                 const isTurn = roomState.state === 'PLAYING' && roomState.currentTurnIndex === index;
                 const isDealer = roomState.dealerIndex === index;
                 const isMe = p.id === sessionId;
@@ -168,16 +219,16 @@ export default function Room({ sessionId, roomState }) {
                 return (
                   <motion.div 
                     key={p.id} 
-                    initial={{ opacity: 0, scale: 0.5, y: 50 }}
+                    initial={{ opacity: 0, scale: 0.5 }}
                     animate={{ 
                       opacity: p.disconnected ? 0.6 : 1, 
                       scale: isTurn ? 1.05 : 1, 
-                      y: 0,
                       boxShadow: isTurn ? '0 0 30px rgba(251,191,36,0.2)' : '0 10px 25px rgba(0,0,0,0.5)'
                     }}
+                    style={{ left, top, x: '-50%', y: '-50%' }}
                     exit={{ opacity: 0, scale: 0.5 }}
                     transition={{ type: "spring", bounce: 0.4 }}
-                    className={`relative flex flex-col items-center bg-gradient-to-b from-slate-800 to-slate-900 backdrop-blur-xl rounded-3xl p-5 w-44 transition-colors border-2 ${isTurn ? 'border-amber-400' : isMe ? 'border-emerald-500/50' : 'border-slate-700/50'}`}
+                    className={`absolute pointer-events-auto flex flex-col items-center bg-gradient-to-b from-slate-800 to-slate-900 backdrop-blur-xl rounded-3xl p-4 md:p-5 w-36 md:w-44 transition-colors border-2 ${isTurn ? 'border-amber-400' : isMe ? 'border-emerald-500/50' : 'border-slate-700/50'}`}
                   >
                     {isDealer && (
                       <motion.div 
@@ -190,10 +241,20 @@ export default function Room({ sessionId, roomState }) {
                     )}
                     {p.isHost && <Crown size={18} className="absolute top-4 left-4 text-amber-400/80 drop-shadow-md" />}
                     
-                    <div className={`w-16 h-16 rounded-full mb-3 flex items-center justify-center shadow-inner border-2 ${isTurn ? 'bg-amber-500/10 border-amber-500/30' : 'bg-slate-950 border-slate-700/50'}`}>
-                      <User size={30} className={p.disconnected ? 'text-slate-600' : isTurn ? 'text-amber-400' : 'text-slate-400'} />
+                    <div className={`w-16 h-16 rounded-full mb-2 flex items-center justify-center shadow-inner border-2 ${isTurn ? 'bg-amber-500/10 border-amber-500/30' : roomState.state === 'SHOWDOWN' && roomState.winners?.includes(p.id) ? 'bg-amber-400 border-amber-500 shadow-[0_0_20px_rgba(251,191,36,0.6)] z-40' : 'bg-slate-950 border-slate-700/50'}`}>
+                      <User size={30} className={p.disconnected ? 'text-slate-600' : (isTurn || (roomState.state === 'SHOWDOWN' && roomState.winners?.includes(p.id))) ? (roomState.winners?.includes(p.id) ? 'text-amber-900' : 'text-amber-400') : 'text-slate-400'} />
                     </div>
                     
+                    {roomState.gameMode === 'virtual' && p.cards && p.cards.length > 0 && (
+                      <div className="flex gap-1 -mt-5 mb-2 relative z-30 drop-shadow-md">
+                        {p.cards.map((c, i) => (
+                          <div key={i} className={`${i===1 ? 'rotate-6 translate-x-1' : '-rotate-6 -translate-x-1'} transition-transform`}>
+                            <PlayingCard card={c} />
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
                     <div className="text-center w-full truncate font-bold text-slate-100 text-lg">{p.name}</div>
                     <div className="text-emerald-400 font-black tracking-wide mt-1">${p.chips}</div>
                     
@@ -254,23 +315,27 @@ export default function Room({ sessionId, roomState }) {
               className="mt-6 bg-slate-800/90 backdrop-blur-xl rounded-3xl border border-slate-700/80 p-5 md:p-6 shadow-[0_-10px_40px_rgba(0,0,0,0.5)] flex flex-col md:flex-row gap-4 items-center justify-between z-30 relative"
             >
               <div className="flex gap-3 w-full md:w-auto">
-                <motion.button 
-                  whileHover={{ scale: 1.02 }}
-                  whileTap={{ scale: 0.95 }}
-                  onClick={handleFold} 
-                  className="flex-1 md:flex-none bg-rose-950/60 hover:bg-rose-900 text-rose-400 border border-rose-800/50 px-8 py-4 rounded-2xl font-bold transition-colors shadow-sm"
-                >
-                  Fold
-                </motion.button>
-                <motion.button 
-                  whileHover={{ scale: 1.02 }}
-                  whileTap={{ scale: 0.95 }}
-                  onClick={handleCall} 
-                  className="flex-1 md:flex-none bg-slate-700 hover:bg-slate-600 text-slate-100 px-10 py-4 rounded-2xl font-bold transition-colors shadow-sm flex flex-col items-center justify-center leading-tight"
-                >
-                  <span className="text-lg">{callAmount === 0 ? 'Check' : 'Call'}</span>
-                  {callAmount > 0 && <span className="text-xs text-emerald-400 mt-0.5">${callAmount}</span>}
-                </motion.button>
+                {(currentHighestBet > 0 || roomState.street > 0) && (
+                  <motion.button 
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.95 }}
+                    onClick={handleFold} 
+                    className="flex-1 md:flex-none bg-rose-950/60 hover:bg-rose-900 text-rose-400 border border-rose-800/50 px-8 py-4 rounded-2xl font-bold transition-colors shadow-sm"
+                  >
+                    Fold
+                  </motion.button>
+                )}
+                {(currentHighestBet > 0 || roomState.street > 0) && (
+                  <motion.button 
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.95 }}
+                    onClick={handleCall} 
+                    className="flex-1 md:flex-none bg-slate-700 hover:bg-slate-600 text-slate-100 px-10 py-4 rounded-2xl font-bold transition-colors shadow-sm flex flex-col items-center justify-center leading-tight"
+                  >
+                    <span className="text-lg">{callAmount === 0 ? 'Check' : 'Call'}</span>
+                    {callAmount > 0 && <span className="text-xs text-emerald-400 mt-0.5">${callAmount}</span>}
+                  </motion.button>
+                )}
               </div>
               
               <div className="flex gap-3 w-full md:w-auto items-stretch">
@@ -278,9 +343,10 @@ export default function Room({ sessionId, roomState }) {
                   <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 font-bold">$</span>
                   <input 
                     type="number" 
-                    value={betAmount === 0 ? currentHighestBet + minRaise : betAmount}
-                    onChange={(e) => setBetAmount(Number(e.target.value))}
-                    min={currentHighestBet + minRaise}
+                    value={betAmount !== '' ? betAmount : ''}
+                    onChange={(e) => setBetAmount(e.target.value === '' ? '' : Number(e.target.value))}
+                    placeholder={Math.max(1, currentHighestBet + minRaise)}
+                    min={Math.max(1, currentHighestBet + minRaise)}
                     max={me?.chips + me?.currentBet}
                     className="w-full h-full bg-slate-900 border-2 border-slate-700/80 rounded-2xl pl-8 pr-4 text-slate-100 outline-none focus:border-emerald-500 font-mono font-bold text-lg transition-colors"
                   />
@@ -288,7 +354,7 @@ export default function Room({ sessionId, roomState }) {
                 <motion.button 
                   whileHover={{ scale: 1.02 }}
                   whileTap={{ scale: 0.95 }}
-                  onClick={() => handleRaise(betAmount || currentHighestBet + minRaise)}
+                  onClick={() => handleRaise(betAmount !== '' ? betAmount : Math.max(1, currentHighestBet + minRaise))}
                   className="bg-emerald-600 hover:bg-emerald-500 text-white px-8 rounded-2xl font-bold transition-colors shadow-lg flex flex-col items-center justify-center"
                 >
                   <span className="text-lg">{currentHighestBet === 0 ? 'Bet' : 'Raise'}</span>

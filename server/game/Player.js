@@ -14,7 +14,7 @@ class Player {
   resetForNewHand() {
     this.currentBet = 0;
     this.folded = false;
-    this.allIn = this.chips === 0;
+    this.allIn = false;
   }
 }
 

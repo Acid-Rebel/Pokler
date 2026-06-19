@@ -24,7 +24,8 @@ export default function ManualAwardModal({ roomState, sessionId, onClose }) {
     onClose();
   };
 
-  const activePlayers = roomState.players.filter(p => !p.folded && !p.disconnected);
+  // Filter out disconnected players, folded players, and busted players (unless they are all-in this hand)
+  const activePlayers = roomState.players.filter(p => !p.disconnected && !p.folded && (p.chips > 0 || p.allIn));
 
   return (
     <motion.div 

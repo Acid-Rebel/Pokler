@@ -10,6 +10,7 @@ export default function Home({ sessionId }) {
 
   // Host options
   const [initialChips, setInitialChips] = useState(1000);
+  const [gameMode, setGameMode] = useState('physical');
   const [smallBlind, setSmallBlind] = useState(10);
   const [bigBlind, setBigBlind] = useState(20);
 
@@ -19,7 +20,7 @@ export default function Home({ sessionId }) {
     socket.emit('createRoom', {
       hostId: sessionId,
       name,
-      options: { initialChips, smallBlind, bigBlind }
+      options: { initialChips, smallBlind, bigBlind, gameMode }
     }, (response) => {
       if (!response.success) alert('Failed to create room');
     });
@@ -138,8 +139,8 @@ export default function Home({ sessionId }) {
                   transition={{ duration: 0.2 }}
                   className="absolute w-full space-y-4"
                 >
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="col-span-2">
+                  <div className="flex flex-col gap-4">
+                    <div>
                       <label className="block text-xs font-medium text-slate-400 mb-1 ml-1">Starting Chips</label>
                       <input 
                         type="number" 
@@ -149,22 +150,24 @@ export default function Home({ sessionId }) {
                       />
                     </div>
                     <div>
-                      <label className="block text-xs font-medium text-slate-400 mb-1 ml-1">Small Blind</label>
-                      <input 
-                        type="number" 
-                        value={smallBlind}
-                        onChange={(e) => setSmallBlind(Number(e.target.value))}
-                        className="w-full bg-slate-950 border border-slate-700/50 rounded-xl px-3 py-3 outline-none focus:border-emerald-500 text-slate-100"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-slate-400 mb-1 ml-1">Big Blind</label>
-                      <input 
-                        type="number" 
-                        value={bigBlind}
-                        onChange={(e) => setBigBlind(Number(e.target.value))}
-                        className="w-full bg-slate-950 border border-slate-700/50 rounded-xl px-3 py-3 outline-none focus:border-emerald-500 text-slate-100"
-                      />
+                      <label className="block text-xs font-medium text-slate-400 mb-2 ml-1">Game Mode</label>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => setGameMode('physical')}
+                          className={`flex-1 py-3 px-2 rounded-xl text-sm font-bold border-2 transition-all ${gameMode === 'physical' ? 'bg-amber-500/20 border-amber-500 text-amber-400 shadow-[0_0_15px_rgba(251,191,36,0.2)]' : 'bg-slate-950 border-slate-700/50 text-slate-400 hover:border-slate-600'}`}
+                        >
+                          Physical Cards
+                        </button>
+                        <button
+                          onClick={() => setGameMode('virtual')}
+                          className={`flex-1 py-3 px-2 rounded-xl text-sm font-bold border-2 transition-all ${gameMode === 'virtual' ? 'bg-cyan-500/20 border-cyan-500 text-cyan-400 shadow-[0_0_15px_rgba(6,182,212,0.2)]' : 'bg-slate-950 border-slate-700/50 text-slate-400 hover:border-slate-600'}`}
+                        >
+                          Virtual Cards
+                        </button>
+                      </div>
+                      <p className="text-[10px] text-slate-500 mt-2 ml-1 leading-tight">
+                        {gameMode === 'physical' ? 'Use real playing cards at home. The app acts as the chips and dealer engine.' : 'The app deals standard 52-card decks, evaluates hands, and auto-awards the winner!'}
+                      </p>
                     </div>
                   </div>
                 </motion.div>
